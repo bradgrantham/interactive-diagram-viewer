@@ -1,0 +1,4 @@
+line -1 -1 1 1 1 1 1 1
+line 1 -1 -1 1 1 0 1 5
+string 0 0 1 1 1 origin
+string 1 0 1 0 0 X axis
