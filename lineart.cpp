@@ -5,10 +5,25 @@
 #include <cstring>
 #include <cfloat>
 #include <cstdarg>
-#include <GL/glut.h>
+#include <GLFW/glfw3.h>
 
 #include <vector>
 #include <string>
+
+
+static bool gDrawWireframe = false;
+
+static bool gStreamFrames = false;
+
+static int gWindowWidth;
+static int gWindowHeight;
+
+// to handle https://github.com/glfw/glfw/issues/161
+static double gMotionReported = false;
+
+static double gOldMouseX, gOldMouseY;
+static int gButtonPressed = -1;
+
 
 using namespace std;
 
@@ -841,11 +856,9 @@ drawString(void *font, char *str)
 
     len = (int) strlen(str);
     for (i = 0; i < len; i++) {
-        glutBitmapCharacter(font, str[i]);
+        // glutBitmapCharacter(font, str[i]);
     }
 }
-
-int                  winWidth, winHeight;
 
 void glstring(void *font, float x, float y, const char *fmt, ...)
 {
@@ -876,7 +889,7 @@ void glprintf(void *font, int x, int y, char *fmt, ...)
     glPushMatrix();
     glLoadIdentity();
 
-    glOrtho(0, winWidth, 0, winHeight, -1, 1);
+    glOrtho(0, gWindowWidth, 0, gWindowHeight, -1, 1);
     glRasterPos2f(x, y);
 
     va_start(args, fmt);
@@ -900,7 +913,7 @@ void drawStrings(void)
 	String& s = *it;
 
 	glColor3f(s.r, s.g, s.b);
-	glstring(GLUT_BITMAP_9_BY_15, s.x, s.y, " %s", s.s.c_str());
+	// glstring(GLUT_BITMAP_9_BY_15, s.x, s.y, " %s", s.s.c_str());
     }
 }
 
@@ -935,14 +948,14 @@ Transform            mainTransform;
 
 float                aspectRatio = 1;
 
-void init(void)
+void initialize_gl(void)
 {
     xformInitializeViewFromBox(&mainTransform, sceneBox, .57595f);
 
     glClearColor(.2, .2, .4, 1);
 }
 
-void redraw(void)
+static void redraw(GLFWwindow *window)
 { 
     float nearClip, farClip;
 
@@ -971,120 +984,123 @@ void redraw(void)
     drawPoints();
 
     glPopMatrix();
-
-    glutSwapBuffers();
 }
 
-void keyup(unsigned char key, int x, int y)
+static void error_callback(int error, const char* description)
 {
-    switch(key) {
-    case 'f':
-        break;
-    }
+    fprintf(stderr, "GLFW: %s\n", description);
 }
 
-void keyboard(unsigned char key, int x, int y)
+static void key(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    switch(key)
-    {
-        case 'r':
-            mainTransform.mode = XFORM_MODE_TRACKBALL;
-            break;
+    if(action == GLFW_PRESS) {
+        switch(key) {
+            case 'Q': case '\033':
+                glfwSetWindowShouldClose(window, GL_TRUE);
+                break;
 
-        case 'o':
-            mainTransform.mode = XFORM_MODE_ROLL;
-            break;
+            case 'R':
+                mainTransform.mode = XFORM_MODE_TRACKBALL;
+                break;
 
-        case 'x':
-            mainTransform.mode = XFORM_MODE_SCROLL;
-            break;
+            case 'O':
+                mainTransform.mode = XFORM_MODE_ROLL;
+                break;
 
-        case 'z':
-            mainTransform.mode = XFORM_MODE_DOLLY;
-            break;
+            case 'X':
+                mainTransform.mode = XFORM_MODE_SCROLL;
+                break;
 
-        case 'q': case 'Q': case '\033':
-            exit(0);
-            break;
+            case 'Z':
+                mainTransform.mode = XFORM_MODE_DOLLY;
+                break;
 
-        case 's':
-            {
-                static unsigned char *pixels;
-                static int pixelsSize;
-                int viewport[4];
-                int i;
-                FILE *fp;
+            case 'S':
+                {
+                    static unsigned char *pixels;
+                    static int pixelsSize;
+                    int viewport[4];
+                    int i;
+                    FILE *fp;
 
-                if((fp = fopen("screenshot.ppm", "wb")) == NULL) {
-                    fprintf(stderr, "snapshot: couldn't open "
-                        "\"screenshot.ppm\".\n");
-                    goto noshot;
-                }
-                glGetIntegerv(GL_VIEWPORT, viewport);
-                if(pixelsSize < viewport[2] * viewport[3] * 3) {
-                    pixelsSize = viewport[2] * viewport[3] * 3;
-                    pixels = (unsigned char *)realloc(pixels, pixelsSize);
-                    if(pixels == NULL) {
-                        fprintf(stderr, "snapshot: couldn't allocate %u "
-                            "bytes for screenshot.\n", pixelsSize);
+                    if((fp = fopen("screenshot.ppm", "wb")) == NULL) {
+                        fprintf(stderr, "snapshot: couldn't open "
+                            "\"screenshot.ppm\".\n");
                         goto noshot;
                     }
+                    glGetIntegerv(GL_VIEWPORT, viewport);
+                    if(pixelsSize < viewport[2] * viewport[3] * 3) {
+                        pixelsSize = viewport[2] * viewport[3] * 3;
+                        pixels = (unsigned char *)realloc(pixels, pixelsSize);
+                        if(pixels == NULL) {
+                            fprintf(stderr, "snapshot: couldn't allocate %u "
+                                "bytes for screenshot.\n", pixelsSize);
+                            goto noshot;
+                        }
+                    }
+                    glPushAttrib(GL_CLIENT_PIXEL_STORE_BIT);
+                    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+                    glReadPixels(viewport[0], viewport[1], viewport[2], viewport[3],
+                        GL_RGB, GL_UNSIGNED_BYTE, pixels);
+                    glPopAttrib();
+                    fprintf(fp, "P6 %d %d 255\n", viewport[2], viewport[3]);
+                    for(i = viewport[3] - 1; i >= 0; i--)
+                        fwrite(pixels + viewport[2] * 3 * i, 3, viewport[2], fp);
+                    fclose(fp);
+            noshot:;
                 }
-                glPushAttrib(GL_CLIENT_PIXEL_STORE_BIT);
-                glPixelStorei(GL_PACK_ALIGNMENT, 1);
-                glReadPixels(viewport[0], viewport[1], viewport[2], viewport[3],
-                    GL_RGB, GL_UNSIGNED_BYTE, pixels);
-                glPopAttrib();
-                fprintf(fp, "P6 %d %d 255\n", viewport[2], viewport[3]);
-                for(i = viewport[3] - 1; i >= 0; i--)
-                    fwrite(pixels + viewport[2] * 3 * i, 3, viewport[2], fp);
-                fclose(fp);
-        noshot:;
-            }
-            break;
-
-
-        default:
-            printf("I don't know what do do about key '%c'\n", key);
-            break;
+                break;
+        }
     }
 }
 
-
-static int ox, oy;
-
-
-void button(int b, int state, int x, int y)
+static void resize(GLFWwindow *window, int x, int y)
 {
-    if(state == 1) {
+    glfwGetFramebufferSize(window, &gWindowWidth, &gWindowHeight);
+    glViewport(0, 0, gWindowWidth, gWindowWidth);
+}
+
+static void button(GLFWwindow *window, int b, int action, int mods)
+{
+    double x, y;
+    glfwGetCursorPos(window, &x, &y);
+
+    if(b == GLFW_MOUSE_BUTTON_1 && action == GLFW_PRESS) {
+        gButtonPressed = 1;
+	gOldMouseX = x;
+	gOldMouseY = y;
     } else {
-        ox = x;
-        oy = y;
+        gButtonPressed = -1;
     }
 }
 
-
-void motion(int x, int y)
+static void motion(GLFWwindow *window, double x, double y)
 {
-    int dx, dy;
+    // to handle https://github.com/glfw/glfw/issues/161
+    // If no motion has been reported yet, we catch the first motion
+    // reported and store the current location
+    if(!gMotionReported) {
+        gMotionReported = true;
+        gOldMouseX = x;
+        gOldMouseY = y;
+    }
 
-    dx = x - ox;
-    dy = y - oy;
+    double dx, dy;
 
-    ox = x;
-    oy = y;
+    dx = x - gOldMouseX;
+    dy = y - gOldMouseY;
 
-    xformMotion(&mainTransform, dx / 512.0, dy / 512.0);
+    gOldMouseX = x;
+    gOldMouseY = y;
+
+    if(gButtonPressed == 1) {
+        xformMotion(&mainTransform, dx / gWindowWidth, dy / gWindowHeight);
+    }
 }
 
-
-void reshape(int width, int height)
+static void scroll(GLFWwindow *window, double dx, double dy)
 {
-    glViewport(0, 0, width, height);
-    winWidth = width;
-    winHeight = height;
-    aspectRatio = height / (float) width;
-    glutPostRedisplay();
+    xformMotion(&mainTransform, dx / gWindowWidth, dy / gWindowHeight);
 }
 
 int main(int argc, char **argv)
@@ -1092,18 +1108,6 @@ int main(int argc, char **argv)
     int argsused;
     FILE *in;
     char *progname = argv[0];
-
-    glutInit(&argc, argv);
-    glutInitWindowSize(512, 512);
-    glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH | GLUT_MULTISAMPLE);
-    glutCreateWindow("simple primitive viewer (again)");
-    glutDisplayFunc(redraw);
-    glutIdleFunc(redraw);
-    glutKeyboardUpFunc(keyup);
-    glutKeyboardFunc(keyboard);
-    glutMotionFunc(motion);
-    glutMouseFunc(button);
-    glutReshapeFunc(reshape);
 
     argc--;
     argv++;
@@ -1140,10 +1144,47 @@ int main(int argc, char **argv)
     readArt(in);
     makeBoxes();
 
+    GLFWwindow* window;
 
-    init();
-    glutMainLoop();
-    return(0);
+    glfwSetErrorCallback(error_callback);
+
+    if(!glfwInit())
+        exit(EXIT_FAILURE);
+
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    window = glfwCreateWindow(gWindowWidth = 512, gWindowHeight = 512, progname, NULL, NULL);
+    if (!window) {
+        glfwTerminate();
+        fprintf(stdout, "Couldn't open main window\n");
+        exit(EXIT_FAILURE);
+    }
+
+    glfwMakeContextCurrent(window);
+
+    initialize_gl();
+
+    glfwSetKeyCallback(window, key);
+    glfwSetMouseButtonCallback(window, button);
+    glfwSetCursorPosCallback(window, motion);
+    glfwSetScrollCallback(window, scroll);
+    glfwSetFramebufferSizeCallback(window, resize);
+    glfwSetWindowRefreshCallback(window, redraw);
+
+    while (!glfwWindowShouldClose(window)) {
+
+        redraw(window);
+
+        glfwSwapBuffers(window);
+
+        if(gStreamFrames)
+            glfwPollEvents();
+        else
+            glfwWaitEvents();
+    }
+
+    glfwTerminate();
+
+    return 0;
 }
 
 /* vi:ts=8 sw=4
