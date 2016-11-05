@@ -232,15 +232,11 @@ void writeNodes()
 
 int main(int argc, char **argv)
 {
-    fprintf(stderr, "readNodes\n");
     readNodes();
 
-    fprintf(stderr, "orderNodesInRows\n");
     orderNodesInRows();
 
-    fprintf(stderr, "placeNodes\n");
     placeNodes();
 
-    fprintf(stderr, "writeNodes\n");
     writeNodes();
 }
