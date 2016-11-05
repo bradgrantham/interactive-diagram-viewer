@@ -5,13 +5,13 @@
 #include <cstring>
 #include <cfloat>
 #include <cstdarg>
+
+#include "gltext.h"
+
 #include <GLFW/glfw3.h>
 
 #include <vector>
 #include <string>
-
-
-static bool gDrawWireframe = false;
 
 static bool gStreamFrames = false;
 
@@ -24,6 +24,7 @@ static double gMotionReported = false;
 static double gOldMouseX, gOldMouseY;
 static int gButtonPressed = -1;
 
+GUI::Face *default_face;
 
 using namespace std;
 
@@ -769,6 +770,7 @@ struct String {
     float x, y;
     float r, g, b;
     string s; 
+    GLText *text;
 };
 
 struct Line {
@@ -805,6 +807,7 @@ void readArt (FILE *fp)
                 &r, &g, &b, &soFar);
             string s(input + 7 + soFar);
             String str = {x, y, r, g, b, s};
+            str.text = new GLText(default_face, s);
             strings.push_back(str);
 
 	} else if(strncmp("line ", input, 5) == 0) {
@@ -860,60 +863,22 @@ drawString(void *font, char *str)
     }
 }
 
-void glstring(void *font, float x, float y, const char *fmt, ...)
-{
-    va_list args;
-    char dummy[512];
-
-    glRasterPos2f(x, y);
-
-    va_start(args, fmt);
-    vsprintf(dummy, fmt, args);
-    va_end(args);
-
-    drawString(font, dummy);
-}
-
-void glprintf(void *font, int x, int y, char *fmt, ...)
-{
-    va_list args;
-    char dummy[512];
-
-    glDisable(GL_LIGHTING);
-    glDisable(GL_DEPTH_TEST);
-
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-
-    glOrtho(0, gWindowWidth, 0, gWindowHeight, -1, 1);
-    glRasterPos2f(x, y);
-
-    va_start(args, fmt);
-    vsprintf(dummy, fmt, args);
-    va_end(args);
-
-    drawString(font, dummy);
-
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_LIGHTING);
-}
-
 void drawStrings(void)
 {
     for(auto it = strings.begin(); it != strings.end(); it++) {
 	String& s = *it;
 
 	glColor3f(s.r, s.g, s.b);
-	// glstring(GLUT_BITMAP_9_BY_15, s.x, s.y, " %s", s.s.c_str());
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glLoadIdentity();
+
+        glTranslatef(s.x, s.y, 0);
+
+        s.text->Draw(0);
+        glMatrixMode(GL_MODELVIEW);
+
+        glPopMatrix();
     }
 }
 
@@ -1141,9 +1106,6 @@ int main(int argc, char **argv)
         }
     }
 
-    readArt(in);
-    makeBoxes();
-
     GLFWwindow* window;
 
     glfwSetErrorCallback(error_callback);
@@ -1160,6 +1122,17 @@ int main(int argc, char **argv)
     }
 
     glfwMakeContextCurrent(window);
+
+    GLenum err = glewInit();
+    if (GLEW_OK != err) {
+        fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
+    fprintf(stdout, "Status: Using GLEW %s\n", glewGetString(GLEW_VERSION));
+
+    default_face = FaceManager::GetFace("./FreeSans.ttf", 12 * 64, 0);
+    readArt(in);
+    makeBoxes();
 
     initialize_gl();
 
