@@ -13,10 +13,10 @@
 
 #include "gltext.h"
 
+namespace GUI {
+
 using namespace std;
 using namespace boost;
-
-namespace GUI {
 
 FT_Library library;
 
@@ -371,7 +371,5 @@ void GLText::Draw(float now)
 }
 
 } // namespace GUI
-
-using namespace GUI;
 
 // vi: ts=4

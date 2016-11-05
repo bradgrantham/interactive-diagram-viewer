@@ -869,15 +869,15 @@ void drawStrings(void)
 	String& s = *it;
 
 	glColor3f(s.r, s.g, s.b);
+
         glMatrixMode(GL_MODELVIEW);
         glPushMatrix();
-        glLoadIdentity();
 
         glTranslatef(s.x, s.y, 0);
 
         s.text->Draw(0);
-        glMatrixMode(GL_MODELVIEW);
 
+        glMatrixMode(GL_MODELVIEW);
         glPopMatrix();
     }
 }
@@ -918,11 +918,17 @@ void initialize_gl(void)
     xformInitializeViewFromBox(&mainTransform, sceneBox, .57595f);
 
     glClearColor(.2, .2, .4, 1);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
+
+#define CHECK_OPENGL(l) {int _glerr ; if((_glerr = glGetError()) != GL_NO_ERROR) printf("GL Error: %04X at %d\n", _glerr, l); }
 
 static void redraw(GLFWwindow *window)
 { 
     float nearClip, farClip;
+    CHECK_OPENGL(__LINE__);
 
     nearClip = - mainTransform.translation[2] - mainTransform.referenceSize;
     farClip = - mainTransform.translation[2] + mainTransform.referenceSize;
@@ -945,10 +951,14 @@ static void redraw(GLFWwindow *window)
     glMultMatrixf((float *)mainTransform.matrix);
 
     drawStrings();
+    CHECK_OPENGL(__LINE__);
     drawLines();
+    CHECK_OPENGL(__LINE__);
     drawPoints();
+    CHECK_OPENGL(__LINE__);
 
     glPopMatrix();
+    CHECK_OPENGL(__LINE__);
 }
 
 static void error_callback(int error, const char* description)
