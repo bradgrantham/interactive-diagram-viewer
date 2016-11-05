@@ -875,6 +875,8 @@ void drawStrings(void)
 
         glTranslatef(s.x, s.y, 0);
 
+        glRotatef(39, 0, 0, 1);
+        glScalef(.1, .1, .1);
         s.text->Draw(0);
 
         glMatrixMode(GL_MODELVIEW);
@@ -1140,7 +1142,7 @@ int main(int argc, char **argv)
     }
     fprintf(stdout, "Status: Using GLEW %s\n", glewGetString(GLEW_VERSION));
 
-    default_face = FaceManager::GetFace("./FreeSans.ttf", 12 * 64, 0);
+    default_face = FaceManager::GetFace("./FreeSans.ttf", 48 * 64, 0);
     readArt(in);
     makeBoxes();
 
