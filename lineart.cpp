@@ -7,7 +7,10 @@
 #include <cstdarg>
 #include <GL/glut.h>
 
-#include <math.h>
+#include <vector>
+#include <string>
+
+using namespace std;
 
 
 float vec3fOrigin[3] = {0.0f, 0.0f, 0.0f}; 
@@ -747,291 +750,10 @@ void xformInitializeViewFromBox(Transform *xform, float box[6], float fov)
     xform->mode = XFORM_MODE_TRACKBALL;
 }
 
-#include <sys/types.h>
-#include <stdlib.h>
-
-#if !defined(MEM_CHART)
-#define chartedSetLabel(a)
-#endif
-
-#if defined(_POSIX93)
-
-#include <sys/time.h>
-
-typedef struct {
-    struct timespec Ts;
-} Timer;
-
-void
-timerInit(void)
-{
-}
-
-void
-timerReset(Timer *t)
-{
-    clock_gettime(CLOCK_REALTIME, &t->Ts);
-}
-
-double
-timerGet(Timer *t)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return ts.tv_sec - t->Ts.tv_sec + (ts.tv_nsec - t->Ts.tv_nsec) / 1.e9;
-}
-
-#endif /* _POSIX93 */
-
-/*----------------------------------------*/
-
-#if defined(__linux) || defined(__APPLE__)
-
-#include <sys/time.h>
-
-typedef struct {
-    struct timeval Ts;
-} Timer;
-
-void
-timerInit(void)
-{
-}
-
-void
-timerReset(Timer *t)
-{
-    gettimeofday(&t->Ts, NULL);
-}
-
-double
-timerGet(Timer *t)
-{
-    struct timeval ts;
-    gettimeofday(&ts, NULL);
-    return ts.tv_sec - t->Ts.tv_sec + (ts.tv_usec - t->Ts.tv_usec) / 1.e6;
-}
-
-#endif /* __linux */
-
-/*----------------------------------------*/
-
-#if defined(_WIN32)
-
-#include <sys/timeb.h>
-
-typedef struct {
-    struct _timeb Ts;
-    LONGLONG PerfCount;
-} Timer;
-
-static LARGE_INTEGER	scratch;
-static int		useHighPerf;
-static LONGLONG		perfFreq;
-
-void
-timerInit(void)
-{
-    if(!QueryPerformanceFrequency(&scratch)) {
-        useHighPerf = 0;
-    } else {
-        useHighPerf = 1;
-	perfFreq = scratch.QuadPart;
-    }
-}
-
-void
-timerReset(Timer *t)
-{
-    if(useHighPerf) {
-        QueryPerformanceCounter(&scratch);
-	t->PerfCount = scratch.QuadPart;
-    } else
-        _ftime(&t->Ts);
-}
-
-double
-timerGet(Timer *t)
-{
-    struct _timeb ts;
-    if(useHighPerf) {
-        QueryPerformanceCounter(&scratch);
-        return (scratch.QuadPart - t->PerfCount) / (double)perfFreq;
-    } else {
-        _ftime(&ts);
-        return ts.time - t->Ts.time + 0.001 * (ts.millitm - t->Ts.millitm);
-    }
-}
-
-#endif /* _WIN32 */
-
-/*----------------------------------------*/
-
-#if defined(macintosh)
-
-#include <Timer.h>
-
-typedef struct {
-    UnsignedWide Ts;
-} Timer;
-
-void
-timerInit(void)
-{
-}
-
-void
-timerReset(Timer *t)
-{
-    Microseconds(&t->Ts);
-}
-
-double
-timerGet(Timer *t)
-{
-    UnsignedWide ts;
-    Microseconds(&ts);
-    return (ts.hi - t->Ts.hi) * 4294.967296 + (ts.lo - t>Ts.lo) / 1.e6;
-}
-
-#endif /* macintosh */
-
-/*----------------------------------------*/
-
-Timer *timerNew(void)
-{
-    Timer *t;
-
-    chartedSetLabel("new timer");
-    t = (Timer *)malloc(sizeof(Timer));
-    timerReset(t);
-    return t;
-}
-
-
-#define		SPURIOUS_EVENT_TIME_THRESHOLD	0.05
-
-int		wasFlung;
-
-float		mouseVelX; 	/* pixels per second */
-float		mouseVelY; 	/* pixels per second */
-
-Timer		*motionTimer;
-
-typedef struct MouseEvent {
-    float dx, dy;
-    float time;
-} MouseEvent;
-
-MouseEvent	mouseHist[5];
-int		mouseHistCount = sizeof(mouseHist) / sizeof(mouseHist[0]);
-int		mouseHistCur;
-int		mouseHistLength;
-
-/* 1-based. */
-MouseEvent	*getMouseEvt(int age)
-{
-    return &mouseHist[(mouseHistCur - age + mouseHistCount) %
-        mouseHistCount];
-}
-
-void flingInit(void)
-{
-    if(motionTimer == NULL)
-        motionTimer = timerNew();
-}
-
-void flingUpdate(Transform *xform)
-{
-    if(wasFlung) {
-        double dx, dy;
-	float timeDelta;
-
-	timeDelta = timerGet(motionTimer);
-        timerReset(motionTimer);
-
-        dx = mouseVelX * timeDelta;
-        dy = mouseVelY * timeDelta;
-	xformMotion(xform, dx, dy);
-    }
-}
-
-void flingFinish(int flung)
-{
-    float curTime;
-    int i;
-    float totalX = 0;
-    float totalY = 0;
-    float totalTime;
-
-    curTime = timerGet(motionTimer);
-
-    if(mouseHistLength > 0) {
-	if(getMouseEvt(1)->time - getMouseEvt(2)->time 
-	    > SPURIOUS_EVENT_TIME_THRESHOLD) {
-
-	    /* last event before button up was spurious, discard it. */
-	    mouseHistCur = (mouseHistCur - 1 + mouseHistCount) %
-	        mouseHistCount;
-	    mouseHistLength--;
-	}
-
-	totalTime = timerGet(motionTimer) - getMouseEvt(mouseHistLength)->time;
-
-	for(i = mouseHistLength; i > 0; i--) {
-	    MouseEvent *m = getMouseEvt(i);
-	    totalX += m->dx;
-	    totalY += m->dy;
-	    // printf("    %d %f: %f %f\n", mouseHistLength - i, m->time, m->dx, m->dy);
-	}
-
-#if defined(DEBUG)
-	printf("averaged speed on mouse up: %f (%f %f over %f sec)\n",
-	    sqrt(totalX / totalTime * totalX / totalTime +
-		totalY / totalTime * totalY / totalTime),
-	    totalX, totalY, totalTime);
-#endif /* defined(DEBUG) */
-
-	if(flung) {
-	    wasFlung = 1;
-	    mouseVelX = totalX / totalTime;
-	    mouseVelY = totalY / totalTime;
-	}
-    }
-
-    timerReset(motionTimer);
-}
-
-void flingReset(void)
-{
-    wasFlung = 0;
-    mouseHistCur = 0;
-    mouseHistLength = 0;
-    timerReset(motionTimer);
-}
-
-void flingAddEvent(float dx, float dy)
-{
-    if(mouseHistLength < mouseHistCount) {
-	mouseHistLength++;
-    }
-    mouseHist[mouseHistCur].dx = dx;
-    mouseHist[mouseHistCur].dy = dy;
-    mouseHist[mouseHistCur].time = timerGet(motionTimer);
-    mouseHistCur = (mouseHistCur + 1) % mouseHistCount;
-}
-
-/* SNIPPET "hsv2rgb.c" Inducted Sat Nov 10 21:28:06 2001 */
-
-
-#if !defined(ROUND_UP)
-#define ROUND_UP(a, b) ((((a) + ((b) - 1)) / (b)) * (b))
-#endif
-
 struct String {
     float x, y;
     float r, g, b;
-    char *string; 
+    string s; 
 };
 
 struct Line {
@@ -1047,22 +769,9 @@ struct Point {
     float size;
 };
 
-struct Icon {
-    float x, y;
-    float w, h;
-    char *filename;
-    GLint texobj;
-};
-
-#define MAX_STRINGS 1000
-#define MAX_LINES 1000
-#define MAX_POINTS 1000
-String strings[MAX_STRINGS];
-int stringCount;
-Line lines[MAX_LINES];
-int lineCount;
-Point points[MAX_POINTS];
-int pointCount;
+vector<String> strings;
+vector<Line> lines;
+vector<Point> points;
 /* icons later */
 
 void readArt (FILE *fp)
@@ -1070,47 +779,34 @@ void readArt (FILE *fp)
     char input[512];
 
     while(fgets(input, sizeof(input) - 1, fp) != NULL) {
+
 	input[strlen(input) - 1] = '\0';
+
 	if(strncmp("string ", input, 7) == 0) {
-	    if(stringCount == MAX_STRINGS) {
-		fprintf(stderr, "max string count reached\n");
-	    } else {
-		String *str;
-		int soFar;
-		stringCount++;
-		str = strings + stringCount - 1;
-		sscanf(input + 7, "%f %f %f %f %f %n", &str->x, &str->y,
-		    &str->r, &str->g, &str->b, &soFar);
-		str->string = strdup(input + 7 + soFar);
-		// printf("\"%s\" at %f, %f, color %f, %f ,%f\n",
-		    // str->string, str->x, str->y,
-		    // str->r, str->g, str->b);
-	    }
+
+            int soFar;
+            float x, y, r, g, b;
+            sscanf(input + 7, "%f %f %f %f %f %n", &x, &y,
+                &r, &g, &b, &soFar);
+            string s(input + 7 + soFar);
+            String str = {x, y, r, g, b, s};
+            strings.push_back(str);
+
 	} else if(strncmp("line ", input, 5) == 0) {
-	    if(lineCount == MAX_LINES) {
-		fprintf(stderr, "max line count reached\n");
-	    } else {
-		Line *line;
-		lineCount++;
-		line = lines + lineCount - 1;
-		sscanf(input + 5, "%f %f %f %f %f %f %f %f",
-		    &line->x1, &line->y1, &line->x2, &line->y2,
-		    &line->r, &line->g, &line->b, &line->width);
-		// printf("line at %f, %f, to %f, %f, color %f, %f ,%f, %f wide\n",
-		    // line->x1, line->y1, line->x2, line->y2,
-		    // line->r, line->g, line->b, line->width);
-	    }
+
+            float x1, x2, y1, y2, r, g, b, width;
+            sscanf(input + 5, "%f %f %f %f %f %f %f %f",
+                &x1, &y1, &x2, &y2, &r, &g, &b, &width);
+            Line line = {x1, y1, x2, y2, r, g, b, width};
+            lines.push_back(line);
+
 	} else if(strncmp("point ", input, 6) == 0) {
-	    if(pointCount == MAX_POINTS) {
-		fprintf(stderr, "max point count reached\n");
-	    } else {
-		Point *point;
-		pointCount++;
-		point = points + pointCount - 1;
-		sscanf(input + 5, "%f %f %f %f %f %f",
-		    &point->x, &point->y,
-		    &point->r, &point->g, &point->b, &point->size);
-	    }
+
+            float x, y, r, g, b, size;
+            sscanf(input + 5, "%f %f %f %f %f %f",
+                &x, &y, &r, &g, &b, &size);
+            Point point = {x, y, r, g, b, size};
+            points.push_back(point);
 	}
     }
 }
@@ -1119,24 +815,22 @@ float sceneBox[6];
 
 void makeBoxes(void)
 {
-    int i, j;
-
     boxInit(sceneBox);
 
-    for(i = 0; i < stringCount; i++) {
-	String *s = strings + i;
-	boxExtendByPoint(sceneBox, s->x, s->y, 0.0);
+    for(auto it = strings.begin(); it != strings.end(); it++) {
+	String& s = *it;
+	boxExtendByPoint(sceneBox, s.x, s.y, 0.0);
     }
 
-    for(i = 0; i < lineCount; i++) {
-	Line *l = lines + i;
-	boxExtendByPoint(sceneBox, l->x1, l->y1, 0.0);
-	boxExtendByPoint(sceneBox, l->x2, l->y2, 0.0);
+    for(auto it = lines.begin(); it != lines.end(); it++) {
+	Line& l = *it;
+	boxExtendByPoint(sceneBox, l.x1, l.y1, 0.0);
+	boxExtendByPoint(sceneBox, l.x2, l.y2, 0.0);
     }
 
-    for(i = 0; i < pointCount; i++) {
-	Point *p = points + i;
-	boxExtendByPoint(sceneBox, p->x, p->y, 0.0);
+    for(auto it = points.begin(); it != points.end(); it++) {
+	Point& p = *it;
+	boxExtendByPoint(sceneBox, p.x, p.y, 0.0);
     }
 }
 
@@ -1202,78 +896,62 @@ void glprintf(void *font, int x, int y, char *fmt, ...)
 
 void drawStrings(void)
 {
-    int i;
-    String *s;
+    for(auto it = strings.begin(); it != strings.end(); it++) {
+	String& s = *it;
 
-    for(i = 0; i < stringCount; i++) {
-	s = strings + i;
-
-	glColor3f(s->r, s->g, s->b);
-	glstring(GLUT_BITMAP_9_BY_15, s->x, s->y, " %s", s->string);
+	glColor3f(s.r, s.g, s.b);
+	glstring(GLUT_BITMAP_9_BY_15, s.x, s.y, " %s", s.s.c_str());
     }
 }
 
 void drawLines(void)
 {
-    int i;
-    Line *l;
+    for(auto it = lines.begin(); it != lines.end(); it++) {
+	Line& l = *it;
 
-    for(i = 0; i < lineCount; i++) {
-	l = lines + i;
-
-	glColor3f(l->r, l->g, l->b);
-	glLineWidth(l->width);
+	glColor3f(l.r, l.g, l.b);
+	glLineWidth(l.width);
 	glBegin(GL_LINES);
-	glVertex2f(l->x1, l->y1);
-	glVertex2f(l->x2, l->y2);
+	glVertex2f(l.x1, l.y1);
+	glVertex2f(l.x2, l.y2);
 	glEnd();
     }
 }
 
 void drawPoints(void)
 {
-    int i;
-    Point *p;
+    for(auto it = points.begin(); it != points.end(); it++) {
+	Point& p = *it;
 
-    for(i = 0; i < pointCount; i++) {
-	p = points + i;
-
-	glColor3f(p->r, p->g, p->b);
-	glPointSize(p->size);
+	glColor3f(p.r, p.g, p.b);
+	glPointSize(p.size);
 	glBegin(GL_POINTS);
-	glVertex2f(p->x, p->y);
+	glVertex2f(p.x, p.y);
 	glEnd();
     }
 }
 
-int willFling = 0;
-
-Transform            transform;
-Transform            *curTransform;
-Timer                *frameTimer;
+Transform            mainTransform;
 
 float                aspectRatio = 1;
 
 void init(void)
 {
-    xformInitializeViewFromBox(&transform, sceneBox, .57595f);
+    xformInitializeViewFromBox(&mainTransform, sceneBox, .57595f);
 
     glClearColor(.2, .2, .4, 1);
 }
 
 void redraw(void)
 { 
-    int i;
     float nearClip, farClip;
 
-    flingUpdate(curTransform);
-
-    nearClip = - transform.translation[2] - transform.referenceSize;
-    farClip = - transform.translation[2] + transform.referenceSize;
-    if(nearClip < 0.1 * transform.referenceSize)
-        nearClip = 0.1 * transform.referenceSize;
-    if(farClip < 0.2 * transform.referenceSize)
-        nearClip = 0.2 * transform.referenceSize;
+    nearClip = - mainTransform.translation[2] - mainTransform.referenceSize;
+    farClip = - mainTransform.translation[2] + mainTransform.referenceSize;
+    if(nearClip < 0.1 * mainTransform.referenceSize)
+        nearClip = 0.1 * mainTransform.referenceSize;
+    if(farClip < 0.2 * mainTransform.referenceSize)
+        nearClip = 0.2 * mainTransform.referenceSize;
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glFrustum(-.66 / aspectRatio * nearClip, .66 / aspectRatio * nearClip,
@@ -1286,7 +964,7 @@ void redraw(void)
 
     glPushMatrix();
 
-    glMultMatrixf((float *)transform.matrix);
+    glMultMatrixf((float *)mainTransform.matrix);
 
     drawStrings();
     drawLines();
@@ -1301,7 +979,6 @@ void keyup(unsigned char key, int x, int y)
 {
     switch(key) {
     case 'f':
-        willFling = 0;
         break;
     }
 }
@@ -1310,28 +987,20 @@ void keyboard(unsigned char key, int x, int y)
 {
     switch(key)
     {
-        case 'f':
-            willFling = 1;
-            break;
-
         case 'r':
-            transform.mode = XFORM_MODE_TRACKBALL;
-            flingReset();
+            mainTransform.mode = XFORM_MODE_TRACKBALL;
             break;
 
         case 'o':
-            transform.mode = XFORM_MODE_ROLL;
-            flingReset();
+            mainTransform.mode = XFORM_MODE_ROLL;
             break;
 
         case 'x':
-            transform.mode = XFORM_MODE_SCROLL;
-            flingReset();
+            mainTransform.mode = XFORM_MODE_SCROLL;
             break;
 
         case 'z':
-            transform.mode = XFORM_MODE_DOLLY;
-            flingReset();
+            mainTransform.mode = XFORM_MODE_DOLLY;
             break;
 
         case 'q': case 'Q': case '\033':
@@ -1382,22 +1051,15 @@ void keyboard(unsigned char key, int x, int y)
 }
 
 
-void menu(int key)
-{
-    keyboard(key, 0, 0);
-}
-
 static int ox, oy;
 
 
 void button(int b, int state, int x, int y)
 {
     if(state == 1) {
-        flingFinish(willFling);
     } else {
         ox = x;
         oy = y;
-        flingReset();
     }
 }
 
@@ -1412,9 +1074,7 @@ void motion(int x, int y)
     ox = x;
     oy = y;
 
-    xformMotion(curTransform, dx / 512.0, dy / 512.0);
-
-    flingAddEvent(dx / 512.0, dy / 512.0);
+    xformMotion(&mainTransform, dx / 512.0, dy / 512.0);
 }
 
 
@@ -1467,14 +1127,6 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    glutCreateMenu(menu);
-    glutAddMenuEntry("(s) Take screenshot", 's');
-    glutAddMenuEntry("(q) Quit", 'q');
-    glutAddMenuEntry("Others:", -1);
-    glutAddMenuEntry("Hold down 'f' to automove", -1);
-    glutAddMenuEntry("   on mouse up", -1);
-    glutAttachMenu(GLUT_RIGHT_BUTTON);
-    
     if(strcmp(argv[0], "-") == 0) {
         in = stdin;
     } else {
@@ -1488,12 +1140,6 @@ int main(int argc, char **argv)
     readArt(in);
     makeBoxes();
 
-    flingInit();
-
-    curTransform = &transform;
-
-    timerInit();
-    frameTimer = timerNew();
 
     init();
     glutMainLoop();
